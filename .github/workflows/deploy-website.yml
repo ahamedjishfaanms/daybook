@@ -30,5 +30,7 @@ jobs:
       - uses: actions/upload-pages-artifact@v4
         with:
           path: public
+      # GitHub's artifact list can lag a few seconds behind the upload.
+      - run: sleep 20
       - id: deployment
         uses: actions/deploy-pages@v4
