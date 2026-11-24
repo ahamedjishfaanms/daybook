@@ -29,7 +29,13 @@ firestore.indexes.json  firebase.json
 4. **Project settings (⚙) → General → Your apps → Web (`</>`)** → register an app → copy the `firebaseConfig` object into `public/firebase-config.js`.
 5. **Project settings → Cloud Messaging → Web Push certificates → Generate key pair** → paste the key into `VAPID_KEY` in `public/firebase-config.js`.
 
-## 2. Deploy (Firebase Hosting — recommended, free, HTTPS)
+## 2. Deploy
+
+**Already set up: GitHub Pages.** Every push to `main` publishes `public/` to
+**https://ahamedjishfaanms.github.io/daybook/** (workflow: `.github/workflows/deploy-website.yml`).
+In Firebase → Authentication → Settings → **Authorised domains**, add `ahamedjishfaanms.github.io`.
+
+### Or: Firebase Hosting
 
 ```bash
 npm install -g firebase-tools
@@ -110,8 +116,7 @@ phone is locked** — no Blaze plan or Cloud Function needed.
 1. Create an empty repo on GitHub (e.g. `daybook-tasks`) — no README.
 2. In this folder:
    ```bash
-   git remote add origin https://github.com/<your-username>/daybook-tasks.git
-   git push -u origin main
+   git push   # repo: https://github.com/ahamedjishfaanms/daybook
    ```
 3. On GitHub open **Actions** → *Build Android APK* (takes ~5–8 min the first time).
 4. Open **Releases** → **Daybook 1.0.N** → download **Daybook.apk** on your phone → open it.
