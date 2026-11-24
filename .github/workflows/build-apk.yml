@@ -1,0 +1,60 @@
+# Builds the Daybook Android app (APK) on GitHub's servers.
+# Runs on every push to "main", or by hand: Actions tab -> "Build Android APK" -> Run workflow.
+# The APK appears under Releases (direct download) and as a workflow artifact.
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Copy the web app into the Android project
+        run: npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Daybook.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Daybook-apk
+          path: Daybook.apk
+
+      - name: Publish to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Daybook 1.0.${{ github.run_number }}
+          files: Daybook.apk
+          body: |
+            Install on Android: download **Daybook.apk** below on your phone and open it.
+            If asked, allow "Install unknown apps" for your browser or Files app.

@@ -1,0 +1,14 @@
+{
+  "appId": "org.beingtechy.daybook",
+  "appName": "Daybook",
+  "webDir": "public",
+  "android": {
+    "backgroundColor": "#f4f3ef"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_daybook",
+      "iconColor": "#1f6f5c"
+    }
+  }
+}

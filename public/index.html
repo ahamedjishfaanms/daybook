@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Daybook Tasks</title>
+  <meta name="theme-color" content="#1f6f5c" />
+  <meta name="description" content="To-do list with alarm, vibration and popup reminders, and repeating tasks." />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- ============ AUTH ============ -->
+  <section id="authView" class="auth hidden">
+    <div class="auth-card">
+      <div class="brand"><img src="./icons/icon-192.png" alt="" /><h1>Daybook Tasks</h1></div>
+      <p class="muted">Your tasks, reminders and repeating to-dos — on every device.</p>
+
+      <div class="seg" role="tablist">
+        <button class="seg-btn active" data-auth-tab="login">Log in</button>
+        <button class="seg-btn" data-auth-tab="signup">Sign up</button>
+      </div>
+
+      <form id="authForm" autocomplete="on">
+        <label class="field signup-only hidden">Name
+          <input id="authName" type="text" autocomplete="name" placeholder="Your name" />
+        </label>
+        <label class="field">Email
+          <input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" />
+        </label>
+        <label class="field">Password
+          <input id="authPassword" type="password" autocomplete="current-password" required minlength="6" placeholder="At least 6 characters" />
+        </label>
+        <p id="authError" class="error hidden"></p>
+        <button id="authSubmit" class="btn primary wide" type="submit">Log in</button>
+        <button id="forgotBtn" class="link" type="button">Forgot password?</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ APP ============ -->
+  <section id="appView" class="app hidden">
+    <header class="topbar">
+      <div class="brand small"><img src="./icons/icon-192.png" alt="" /><span>Daybook</span></div>
+      <div class="top-actions">
+        <button id="installBtn" class="btn ghost hidden" title="Install app">⬇ Install</button>
+        <button id="notifBtn" class="btn ghost" title="Turn on reminders">🔔 Enable alerts</button>
+        <button id="testAlarmBtn" class="btn ghost" title="Test your alarm">🔊 Test</button>
+        <button id="logoutBtn" class="btn ghost" title="Log out">⎋</button>
+      </div>
+    </header>
+
+    <main class="content">
+      <div class="hello">
+        <h2 id="helloText">Hello</h2>
+        <p id="summaryText" class="muted"></p>
+      </div>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-filter="pending">Pending</button>
+        <button class="tab" data-filter="today">Today</button>
+        <button class="tab" data-filter="repeat">Repeating</button>
+        <button class="tab" data-filter="done">Completed</button>
+      </nav>
+
+      <div id="taskList" class="task-list"></div>
+      <div id="emptyState" class="empty hidden">
+        <div class="empty-icon">✓</div>
+        <p>Nothing here. Tap <b>+</b> to add a task.</p>
+      </div>
+    </main>
+
+    <button id="fab" class="fab" aria-label="Add task">+</button>
+  </section>
+
+  <!-- ============ TASK EDITOR ============ -->
+  <dialog id="taskDialog" class="sheet">
+    <form id="taskForm" method="dialog">
+      <div class="sheet-head">
+        <h3 id="taskDialogTitle">New task</h3>
+        <button type="button" class="icon-btn" data-close>✕</button>
+      </div>
+
+      <label class="field">Task
+        <input id="fTitle" type="text" required maxlength="120" placeholder="e.g. Submit weekly report" />
+      </label>
+      <label class="field">Notes
+        <textarea id="fNotes" rows="2" maxlength="500" placeholder="Optional details"></textarea>
+      </label>
+
+      <div class="row">
+        <label class="field">Date <input id="fDate" type="date" required /></label>
+        <label class="field">Time <input id="fTime" type="time" required /></label>
+      </div>
+
+      <label class="field">Repeat
+        <select id="fRepeat">
+          <option value="none">Does not repeat</option>
+          <option value="daily">Every day</option>
+          <option value="weekly">Weekly on selected days</option>
+          <option value="monthly">Every month (same date)</option>
+        </select>
+      </label>
+      <div id="daysPicker" class="days hidden" aria-label="Repeat on days">
+        <label><input type="checkbox" value="1" /><span>Mon</span></label>
+        <label><input type="checkbox" value="2" /><span>Tue</span></label>
+        <label><input type="checkbox" value="3" /><span>Wed</span></label>
+        <label><input type="checkbox" value="4" /><span>Thu</span></label>
+        <label><input type="checkbox" value="5" /><span>Fri</span></label>
+        <label><input type="checkbox" value="6" /><span>Sat</span></label>
+        <label><input type="checkbox" value="0" /><span>Sun</span></label>
+      </div>
+
+      <label class="field">Remind me
+        <select id="fBefore">
+          <option value="0">At the time of the task</option>
+          <option value="5">5 minutes before</option>
+          <option value="10">10 minutes before</option>
+          <option value="15">15 minutes before</option>
+          <option value="30">30 minutes before</option>
+          <option value="60">1 hour before</option>
+          <option value="1440">1 day before</option>
+          <option value="-1">No reminder</option>
+        </select>
+      </label>
+
+      <fieldset class="alerts" id="alertsBox">
+        <legend>Alert type</legend>
+        <label class="chip"><input id="fSound" type="checkbox" checked /><span>🔊 Alarm sound</span></label>
+        <label class="chip"><input id="fVibrate" type="checkbox" checked /><span>📳 Vibrate</span></label>
+        <label class="chip"><input id="fPopup" type="checkbox" checked /><span>💬 Popup</span></label>
+      </fieldset>
+
+      <p id="taskError" class="error hidden"></p>
+      <div class="sheet-actions">
+        <button type="button" id="deleteTaskBtn" class="btn danger hidden">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ============ ALARM POPUP ============ -->
+  <dialog id="alarmDialog" class="alarm">
+    <div class="alarm-ring">⏰</div>
+    <h3 id="alarmTitle">Reminder</h3>
+    <p id="alarmWhen" class="muted"></p>
+    <p id="alarmNotes"></p>
+    <div class="alarm-actions">
+      <button id="alarmDone" class="btn primary wide">Mark done</button>
+      <div class="row">
+        <button id="alarmSnooze5" class="btn ghost">Snooze 5 min</button>
+        <button id="alarmSnooze15" class="btn ghost">Snooze 15 min</button>
+      </div>
+      <button id="alarmDismiss" class="link">Dismiss</button>
+    </div>
+  </dialog>
+
+  <!-- small bar used when alarm sound/vibrate rings but popup is turned off -->
+  <div id="alarmBar" class="alarm-bar hidden">
+    <span id="alarmBarText">⏰ Reminder</span>
+    <button id="alarmBarStop" class="btn primary">Stop</button>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
