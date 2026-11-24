@@ -1,6 +1,6 @@
 # Hosts the website (the public/ folder) on GitHub Pages:
 #   https://ahamedjishfaanms.github.io/daybook/
-# Runs on every push to "main" that changes the website, or by hand from the Actions tab.
+# Runs on every push to "main" that changes the website (public/), or by hand from the Actions tab.
 name: Deploy website
 
 on:
