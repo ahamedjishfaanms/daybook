@@ -14,7 +14,7 @@ import { firebaseConfig, VAPID_KEY, GOOGLE_WEB_CLIENT_ID } from "./firebase-conf
 import { firstOccurrence, nextFutureOccurrence, describeRepeat } from "./recurrence.js";
 import {
   isNative, initNative, nativeAlertsOn, requestNativeAlerts, scheduleNative, clearNative, dismissNative,
-  nativeGoogleReady, nativeGoogleIdToken, nativeGoogleLogout,
+  nativeGoogleReady, nativeGoogleIdToken, nativeGoogleLogout, testNativeAlarm,
 } from "./native.js";
 
 // ---------- Firebase ----------
@@ -477,9 +477,15 @@ async function checkReminders() {
     try {
       t.reminded = true; // ring once, even while offline
       save(updateDoc(doc(db, "users", user.uid, "tasks", t.id), { reminded: true, remindedBy: "app" }));
-      // App: the Android alarm already rang, so only ring in-app if it is due right now and you're looking.
-      const ringWindow = isNative ? 90_000 : 6 * 3600_000;
-      if (now - at < ringWindow && (!isNative || document.visibilityState === "visible")) fireAlert(t);
+      if (isNative) {
+        // The Android alarm rings/vibrates by itself. If you're looking at the app right now,
+        // Android only shows a banner, so show our pop-up too (silent — the phone is already ringing).
+        if (now - at < 90_000 && document.visibilityState === "visible" && t.alerts?.popup) {
+          fireAlert({ ...t, alerts: { popup: true } });
+        }
+      } else if (now - at < 6 * 3600_000) {
+        fireAlert(t); // website: skip ringing for very old, missed reminders
+      }
     } finally {
       firingNow.delete(t.id);
     }
@@ -594,12 +600,17 @@ $("alarmDone").onclick = async () => {
 };
 $("alarmSnooze5").onclick = () => { const id = Alarm.current?.task.id; Alarm.stop(); if (id) snoozeTask(id, 5); };
 $("alarmSnooze15").onclick = () => { const id = Alarm.current?.task.id; Alarm.stop(); if (id) snoozeTask(id, 15); };
-$("alarmDismiss").onclick = () => Alarm.stop();
+$("alarmDismiss").onclick = () => { const id = Alarm.current?.task.id; Alarm.stop(); if (id) dismissNative(id); };
 $("alarmDialog").addEventListener("cancel", (e) => { e.preventDefault(); Alarm.stop(); });
 $("alarmBarStop").onclick = () => Alarm.stop();
 
-$("testAlarmBtn").onclick = () => {
+$("testAlarmBtn").onclick = async () => {
   Alarm.unlock();
+  if (isNative) {
+    if (!(await nativeAlertsOn())) return toast("Tap “Enable alerts” first.");
+    await testNativeAlarm(5);
+    return toast("Test alarm in 5 seconds — lock your phone to see the full-screen alarm.");
+  }
   const fake = { id: "test", title: "Test reminder", notes: "This is how your alarm looks and sounds.", dueAt: new Date(), repeat: { type: "none" } };
   fireAlert({ ...fake, alerts: { sound: true, vibrate: true, popup: true } });
 };
@@ -644,9 +655,9 @@ $("notifBtn").onclick = async () => {
     await refreshNotifButton();
     if (!r.ok) return toast("Notifications are off. Turn them on in Android Settings → Apps → Daybook.");
     scheduleNative(tasks, { formatDue, dueDate });
-    return toast(r.exact
-      ? "Alerts on — reminders ring on time, even when Daybook is closed."
-      : "Alerts on. Allow “Alarms & reminders” in settings for exact timing.");
+    if (!r.exact) return toast("Alerts on. Allow “Alarms & reminders” for Daybook so reminders ring on time.");
+    if (!r.fullScreen) return toast("Alerts on. Allow “Full-screen notifications” for Daybook to get the pop-up alarm.");
+    return toast("Alerts on — reminders ring, vibrate and pop up even when Daybook is closed.");
   }
   if (!("Notification" in window)) {
     return toast(isIOS() ? "On iPhone: Share → Add to Home Screen, then open the app from there." : "This browser can’t show notifications.");

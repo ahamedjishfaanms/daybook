@@ -6,50 +6,24 @@
 import { Capacitor, registerPlugin } from "./vendor/capacitor-core.js";
 
 export const isNative = Capacitor.isNativePlatform();
-const LN = isNative ? registerPlugin("LocalNotifications") : null;
+const LN = isNative ? registerPlugin("LocalNotifications") : null; // used for the notification permission
+const Alarm = isNative ? registerPlugin("DaybookAlarm") : null;    // our native alarm-clock reminders
 const App = isNative ? registerPlugin("App") : null;
 
 const MAX_SCHEDULED = 60; // keep well under Android's per-app alarm limit
-let exactAllowed = false;
-
-// One Android "channel" per alert combination. Channel = how the phone alerts.
-//   sound  -> plays res/raw/daybook_alarm.wav
-//   vibrate-> vibration on/off
-//   popup  -> importance 5 (heads-up banner over other apps) vs 3 (status bar only)
-function channelFor(alerts = {}) {
-  const s = alerts.sound ? 1 : 0, v = alerts.vibrate ? 1 : 0, p = alerts.popup ? 1 : 0;
-  return `daybook_s${s}v${v}p${p}`;
-}
-const COMBOS = [];
-for (const s of [0, 1]) for (const v of [0, 1]) for (const p of [0, 1]) if (s || v || p) COMBOS.push({ s, v, p });
-const LABEL = ({ s, v, p }) => [s && "Ring", v && "Vibrate", p && "Popup"].filter(Boolean).join(" + ");
 
 /** Call once at start-up. onAction(action, taskId) with action = "open" | "done" | "snooze". */
 export async function initNative({ onAction, onBack }) {
   if (!isNative) return;
   try {
-    for (const c of COMBOS) {
-      await LN.createChannel({
-        id: `daybook_s${c.s}v${c.v}p${c.p}`,
-        name: `Reminders — ${LABEL(c)}`,
-        description: `Task reminders that ${LABEL(c).toLowerCase()}`,
-        importance: c.p ? 5 : 3,
-        visibility: 1,
-        vibration: !!c.v,
-        lights: true,
-        lightColor: "#1F6F5C",
-        ...(c.s ? { sound: "daybook_alarm.wav" } : {}), // no sound file = silent channel
-      });
-    }
-    await LN.registerActionTypes({
-      types: [{ id: "TASK", actions: [{ id: "done", title: "✓ Done" }, { id: "snooze", title: "Snooze 10 min" }] }],
+    // Buttons on the alarm screen / notification open the app with an action.
+    await Alarm.addListener("alarmAction", (e) => {
+      const action = e.action === "done" || e.action === "snooze" ? e.action : "open";
+      if (e.taskId && e.taskId !== "test") onAction(action, e.taskId);
     });
-    await LN.addListener("localNotificationActionPerformed", (e) => {
-      const taskId = e.notification?.extra?.taskId;
-      const action = e.actionId === "done" || e.actionId === "snooze" ? e.actionId : "open";
-      if (taskId) onAction(action, taskId);
-    });
-    exactAllowed = (await LN.checkExactNotificationSetting()).exact_alarm === "granted";
+    // Older builds scheduled through LocalNotifications — clear those so nothing rings twice.
+    const old = (await LN.getPending()).notifications || [];
+    if (old.length) await LN.cancel({ notifications: old.map((n) => ({ id: n.id })) });
   } catch (e) {
     console.warn("Native init failed", e);
   }
@@ -65,19 +39,26 @@ export async function nativeAlertsOn() {
   try { return (await LN.checkPermissions()).display === "granted"; } catch { return false; }
 }
 
-/** Ask for notification permission and the "Alarms & reminders" permission (exact timing). */
+/** Ask for: notifications, exact alarms ("Alarms & reminders") and full-screen pop-ups. */
 export async function requestNativeAlerts() {
   const p = await LN.requestPermissions();
   if (p.display !== "granted") return { ok: false };
   let exact = (await LN.checkExactNotificationSetting()).exact_alarm === "granted";
-  if (!exact) {
-    exact = (await LN.changeExactNotificationSetting()).exact_alarm === "granted";
+  if (!exact) exact = (await LN.changeExactNotificationSetting()).exact_alarm === "granted";
+  let fullScreen = (await Alarm.canFullScreen()).granted;
+  if (!fullScreen) {
+    await Alarm.openFullScreenSettings();
+    fullScreen = (await Alarm.canFullScreen()).granted;
   }
-  exactAllowed = exact;
-  return { ok: true, exact };
+  return { ok: true, exact, fullScreen };
 }
 
-// Stable 31-bit number from a Firestore id (Android notification ids must be ints).
+/** Rings a test alarm a few seconds from now (lock the phone to see the full-screen alarm). */
+export async function testNativeAlarm(seconds = 5) {
+  await Alarm.test({ delaySeconds: seconds, title: "Test reminder", body: "This is how Daybook reminds you." });
+}
+
+// Stable 31-bit number from a Firestore id (Android needs int ids).
 function idFor(taskId) {
   let h = 0;
   for (let i = 0; i < taskId.length; i++) h = (Math.imul(31, h) + taskId.charCodeAt(i)) | 0;
@@ -93,49 +74,33 @@ export function scheduleNative(tasks, { formatDue, dueDate }) {
 }
 
 async function doSchedule(tasks, { formatDue, dueDate }) {
-  if ((await LN.checkPermissions()).display !== "granted") return;
   const now = Date.now();
-  const upcoming = tasks
+  const alarms = tasks
     .filter((t) => !t.completed && !t.reminded && t.reminderAt && t.reminderAt.toDate().getTime() > now + 2000)
     .sort((a, b) => a.reminderAt.toDate() - b.reminderAt.toDate())
-    .slice(0, MAX_SCHEDULED);
-
-  const pending = (await LN.getPending()).notifications || [];
-  if (pending.length) await LN.cancel({ notifications: pending.map((n) => ({ id: n.id })) });
-  if (!upcoming.length) return;
-
-  const res = await LN.schedule({
-    notifications: upcoming.map((t) => ({
+    .slice(0, MAX_SCHEDULED)
+    .map((t) => ({
       id: idFor(t.id),
-      title: "⏰ " + t.title,
+      taskId: t.id,
+      title: t.title,
       body: formatDue(dueDate(t)) + (t.notes ? " — " + t.notes : ""),
-      largeBody: t.notes || undefined,
-      schedule: { at: t.reminderAt.toDate(), allowWhileIdle: true },
-      channelId: channelFor(t.alerts),
-      sound: t.alerts?.sound ? "daybook_alarm.wav" : undefined,
-      actionTypeId: "TASK",
-      extra: { taskId: t.id },
-      autoCancel: true,
-      foreground: !!t.alerts?.popup,
-      isExactNotification: exactAllowed, // never pops the settings screen during a background sync
-    })),
-  });
-  if (res?.warning) console.warn(res.warning);
+      at: t.reminderAt.toDate().getTime(),
+      sound: !!t.alerts?.sound,
+      vibrate: !!t.alerts?.vibrate,
+      popup: !!t.alerts?.popup,
+    }));
+  await Alarm.schedule({ alarms });
 }
 
 export async function clearNative() {
   if (!isNative) return;
-  try {
-    const pending = (await LN.getPending()).notifications || [];
-    if (pending.length) await LN.cancel({ notifications: pending.map((n) => ({ id: n.id })) });
-    await LN.removeAllDeliveredNotifications();
-  } catch {}
+  try { await Alarm.cancelAll(); } catch {}
 }
 
-/** Remove a reminder that is showing in the notification shade (after Done / Snooze in the app). */
+/** Silence a reminder that is ringing (after Done / Snooze in the app). */
 export async function dismissNative(taskId) {
   if (!isNative) return;
-  try { await LN.removeDeliveredNotificationsById({ ids: [idFor(taskId)] }); } catch {}
+  try { await Alarm.stop({ id: idFor(taskId) }); } catch {}
 }
 
 // ---------- Google sign-in inside the APK ----------
