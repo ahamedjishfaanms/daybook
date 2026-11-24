@@ -29,6 +29,38 @@ firestore.indexes.json  firebase.json
 4. **Project settings (⚙) → General → Your apps → Web (`</>`)** → register an app → copy the `firebaseConfig` object into `public/firebase-config.js`.
 5. **Project settings → Cloud Messaging → Web Push certificates → Generate key pair** → paste the key into `VAPID_KEY` in `public/firebase-config.js`.
 
+## 1b. Publish the database rules (required)
+
+Without published rules, a Firestore database in production mode blocks every read and write: tasks stay
+on one device and never sync. In the Firebase console → **Firestore Database → Rules**, replace
+everything with the contents of `firestore.rules` and click **Publish**:
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+      match /{sub=**} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+  }
+}
+```
+
+The app shows **"synced"** next to your email when the cloud has your tasks.
+
+## 1c. Google sign-in
+
+1. Firebase → **Authentication → Sign-in method → Add new provider → Google → Enable** → Save.
+2. Website: works right away (make sure the site's domain is in *Authorised domains*).
+3. Android app: Firebase → **Project settings → General → Add app → Android**
+   - Package name: `org.beingtechy.daybook`
+   - SHA-1: `B4:10:AC:E5:49:E8:74:D6:32:EB:AF:92:98:C5:33:3A:F4:E5:F1:F0` (from `android/daybook.keystore`)
+   - Then copy the **Web client ID** (Authentication → Sign-in method → Google → Web SDK configuration)
+     into `GOOGLE_WEB_CLIENT_ID` in `public/firebase-config.js` and push.
+
 ## 2. Deploy
 
 **Already set up: GitHub Pages.** Every push to `main` publishes `public/` to

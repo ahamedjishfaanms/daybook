@@ -12,3 +12,7 @@ export const firebaseConfig = {
 // Firebase console -> Project settings -> Cloud Messaging -> Web Push certificates -> "Generate key pair".
 //    Needed only for reminders while the app is CLOSED (see README). Leave as-is to skip.
 export const VAPID_KEY = "BHJmF2FqX_fhaxbzHYBqLZ4hJs4Ei8rObzXqK3jJMetR73Of9BNR3Kqm2rJUo6SZluh2Op5mFrE1p1c47sAzTaU";
+
+// Google sign-in inside the Android app (the website doesn't need this):
+// Firebase console -> Authentication -> Sign-in method -> Google -> "Web SDK configuration" -> Web client ID.
+export const GOOGLE_WEB_CLIENT_ID = "PASTE_WEB_CLIENT_ID.apps.googleusercontent.com";

@@ -175,3 +175,19 @@ dialog::backdrop { background: rgba(10, 15, 12, 0.45); }
 @media (max-width: 480px) {
   .top-actions .btn { padding: 6px 8px; font-size: 12px; }
 }
+
+/* Google sign-in */
+.btn.google { background: var(--surface); border: 1px solid var(--line); color: var(--text); display: flex; align-items: center; justify-content: center; gap: 10px; padding: 11px 14px; }
+.btn.google:hover { background: var(--surface-2); }
+.btn.google:disabled { opacity: .6; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; margin: 16px 0 12px; }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* which account + cloud sync status */
+.account-line { font-size: 12.5px; color: var(--muted); margin: 2px 0 0; }
+.account-line .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--brand); margin-right: 6px; vertical-align: 1px; }
+.account-line.pending .dot { background: #d99a1c; }
+.account-line.offline .dot { background: var(--muted); }
+.account-line.error .dot { background: var(--danger); }
+.sync-banner { display: flex; flex-direction: column; gap: 2px; background: var(--warn-soft); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-radius: 12px; padding: 10px 14px; margin: 0 0 14px; font-size: 14px; }
+.sync-banner span { color: var(--text); opacity: .85; }

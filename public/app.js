@@ -8,10 +8,14 @@ import {
   collection, doc, addDoc, updateDoc, deleteDoc, setDoc, onSnapshot, query, orderBy,
   serverTimestamp, Timestamp, increment,
   getMessaging, getToken, isSupported,
+  GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential, getDoc,
 } from "./vendor/firebase.js";
-import { firebaseConfig, VAPID_KEY } from "./firebase-config.js";
+import { firebaseConfig, VAPID_KEY, GOOGLE_WEB_CLIENT_ID } from "./firebase-config.js";
 import { firstOccurrence, nextFutureOccurrence, describeRepeat } from "./recurrence.js";
-import { isNative, initNative, nativeAlertsOn, requestNativeAlerts, scheduleNative, clearNative, dismissNative } from "./native.js";
+import {
+  isNative, initNative, nativeAlertsOn, requestNativeAlerts, scheduleNative, clearNative, dismissNative,
+  nativeGoogleReady, nativeGoogleIdToken, nativeGoogleLogout,
+} from "./native.js";
 
 // ---------- Firebase ----------
 const fbApp = initializeApp(firebaseConfig);
@@ -95,7 +99,7 @@ $("authForm").addEventListener("submit", async (e) => {
       const cred = await createUserWithEmailAndPassword(auth, email, pass);
       const name = $("authName").value.trim();
       if (name) await updateProfile(cred.user, { displayName: name });
-      await setDoc(doc(db, "users", cred.user.uid), { email, name, createdAt: serverTimestamp() }, { merge: true });
+      save(setDoc(doc(db, "users", cred.user.uid), { email, name, createdAt: serverTimestamp() }, { merge: true }));
     }
   } catch (err) {
     showAuthError(friendlyAuthError(err));
@@ -103,6 +107,49 @@ $("authForm").addEventListener("submit", async (e) => {
     $("authSubmit").disabled = false;
   }
 });
+
+// ---------- Google sign-in ----------
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+const nativeGoogle = nativeGoogleReady(GOOGLE_WEB_CLIENT_ID);
+if (isNative && !nativeGoogle) $("googleBtn").title = "Google sign-in needs setup — see README";
+
+$("googleBtn").onclick = async () => {
+  Alarm.unlock();
+  showAuthError("");
+  $("googleBtn").disabled = true;
+  try {
+    let cred;
+    if (isNative) {
+      if (!nativeGoogle) throw { code: "app/google-not-configured" };
+      const idToken = await nativeGoogleIdToken();
+      cred = await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+    } else {
+      try {
+        cred = await signInWithPopup(auth, googleProvider);
+      } catch (err) {
+        if (err.code !== "auth/popup-blocked") throw err;
+        return signInWithRedirect(auth, googleProvider); // page reloads, result handled below
+      }
+    }
+    await saveProfile(cred.user);
+  } catch (err) {
+    if (err?.code !== "auth/popup-closed-by-user" && err?.code !== "auth/cancelled-popup-request" && !/cancel/i.test(err?.message || "")) {
+      showAuthError(friendlyAuthError(err));
+    }
+  } finally {
+    $("googleBtn").disabled = false;
+  }
+};
+if (!isNative) getRedirectResult(auth).then((r) => r && saveProfile(r.user)).catch((err) => showAuthError(friendlyAuthError(err)));
+
+async function saveProfile(u) {
+  try {
+    const ref = doc(db, "users", u.uid);
+    const snap = await getDoc(ref).catch(() => null);
+    if (!snap?.exists()) save(setDoc(ref, { email: u.email, name: u.displayName || "", createdAt: serverTimestamp() }, { merge: true }));
+  } catch {}
+}
 
 $("forgotBtn").onclick = async () => {
   const email = $("authEmail").value.trim();
@@ -117,7 +164,7 @@ $("forgotBtn").onclick = async () => {
 };
 
 $("logoutBtn").onclick = async () => {
-  if (confirm("Log out of Daybook Tasks?")) { await clearNative(); await signOut(auth); }
+  if (confirm("Log out of Daybook Tasks?")) { await clearNative(); await nativeGoogleLogout(); await signOut(auth); }
 };
 
 function showAuthError(msg) {
@@ -134,8 +181,18 @@ function friendlyAuthError(err) {
     "auth/weak-password": "Password must be at least 6 characters.",
     "auth/too-many-requests": "Too many attempts. Please wait a minute and try again.",
     "auth/network-request-failed": "No internet connection.",
+    "auth/unauthorized-domain": "This website address isn’t allowed yet. In Firebase → Authentication → Settings → Authorised domains, add " + location.hostname + ".",
+    "auth/operation-not-allowed": "Google sign-in is switched off. In Firebase → Authentication → Sign-in method, enable Google.",
+    "auth/account-exists-with-different-credential": "This email already has an account with a password. Log in with email and password instead.",
+    "auth/invalid-credential-google": "Google sign-in failed. Please try again.",
+    "app/google-not-configured": "Google sign-in isn’t set up in this app version yet. Use email and password for now.",
   };
-  return map[err.code] || err.message;
+  if (map[err?.code]) return map[err.code];
+  const msg = err?.message || String(err);
+  if (/developer console is not set up|No credentials available|\[16\]|\[10\]/i.test(msg)) {
+    return "Google sign-in isn’t fully set up for the Android app (SHA-1 fingerprint missing in Firebase). Use email and password for now.";
+  }
+  return msg;
 }
 
 onAuthStateChanged(auth, (u) => {
@@ -150,9 +207,11 @@ onAuthStateChanged(auth, (u) => {
   $("authView").classList.add("hidden");
   $("appView").classList.remove("hidden");
   $("helloText").textContent = `Hello, ${u.displayName || u.email.split("@")[0]}`;
+  setSync("checking");
   firstSnapshot = true;
   const q = query(collection(db, "users", u.uid, "tasks"), orderBy("dueAt", "asc"));
-  unsubTasks = onSnapshot(q, (snap) => {
+  unsubTasks = onSnapshot(q, { includeMetadataChanges: true }, (snap) => {
+    syncFromSnapshot(snap);
     tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     render();
     checkReminders();
@@ -161,7 +220,7 @@ onAuthStateChanged(auth, (u) => {
       firstSnapshot = false;
       handleUrlAction();
     }
-  }, (err) => toast("Sync error: " + err.message));
+  }, (err) => setSync("error", err));
   refreshNotifButton();
   if (!isNative && notifGranted()) registerPushToken(); // keep token fresh
 });
@@ -340,9 +399,10 @@ $("taskForm").addEventListener("submit", async (e) => {
     updatedAt: serverTimestamp(),
   };
   try {
+    // Saved on this device instantly; Firestore uploads it when online.
     const col = collection(db, "users", user.uid, "tasks");
-    if (editingId) await updateDoc(doc(col, editingId), data);
-    else await addDoc(col, { ...data, completed: false, timesDone: 0, createdAt: serverTimestamp() });
+    if (editingId) save(updateDoc(doc(col, editingId), data));
+    else save(addDoc(col, { ...data, completed: false, timesDone: 0, createdAt: serverTimestamp() }));
     dlg.close();
     toast(editingId ? "Task updated" : "Task added");
     if (remindBefore >= 0 && !(isNative ? await nativeAlertsOn() : notifGranted())) {
@@ -355,7 +415,7 @@ $("taskForm").addEventListener("submit", async (e) => {
 
 $("deleteTaskBtn").onclick = async () => {
   if (!editingId || !confirm("Delete this task?")) return;
-  await deleteDoc(doc(db, "users", user.uid, "tasks", editingId));
+  save(deleteDoc(doc(db, "users", user.uid, "tasks", editingId)));
   dlg.close();
   toast("Task deleted");
 };
@@ -382,21 +442,21 @@ async function completeTask(t) {
   if (isRepeat(t)) {
     // Repeating task: log it and move it to the next date (e.g. next Monday/Tuesday)
     const next = nextFutureOccurrence(dueDate(t), t.repeat);
-    await updateDoc(ref, {
+    save(updateDoc(ref, {
       ...scheduleFields(next, t.remindBefore),
       timesDone: increment(1),
       lastDoneAt: serverTimestamp(),
-    });
+    }));
     toast(`Done! Next: ${formatDue(next)}`);
   } else {
-    await updateDoc(ref, { completed: true, completedAt: serverTimestamp(), reminded: true });
+    save(updateDoc(ref, { completed: true, completedAt: serverTimestamp(), reminded: true }));
     toast("Task completed ✓");
   }
 }
 async function reopenTask(t) {
-  await updateDoc(doc(db, "users", user.uid, "tasks", t.id), {
+  save(updateDoc(doc(db, "users", user.uid, "tasks", t.id), {
     completed: false, completedAt: null, ...scheduleFields(dueDate(t), t.remindBefore),
-  });
+  }));
 }
 
 // ======================================================================
@@ -415,7 +475,8 @@ async function checkReminders() {
     if (at > now) continue;
     firingNow.add(t.id);
     try {
-      await updateDoc(doc(db, "users", user.uid, "tasks", t.id), { reminded: true, remindedBy: "app" });
+      t.reminded = true; // ring once, even while offline
+      save(updateDoc(doc(db, "users", user.uid, "tasks", t.id), { reminded: true, remindedBy: "app" }));
       // App: the Android alarm already rang, so only ring in-app if it is due right now and you're looking.
       const ringWindow = isNative ? 90_000 : 6 * 3600_000;
       if (now - at < ringWindow && (!isNative || document.visibilityState === "visible")) fireAlert(t);
@@ -457,7 +518,7 @@ async function showSystemNotification(t, alerts) {
 async function snoozeTask(taskId, minutes) {
   dismissNative(taskId);
   const at = new Date(Date.now() + minutes * 60000);
-  await updateDoc(doc(db, "users", user.uid, "tasks", taskId), { reminderAt: Timestamp.fromDate(at), reminded: false });
+  save(updateDoc(doc(db, "users", user.uid, "tasks", taskId), { reminderAt: Timestamp.fromDate(at), reminded: false }));
   toast(`Snoozed until ${at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
 }
 
@@ -624,6 +685,63 @@ async function registerPushToken() {
 // ======================================================================
 // HELPERS
 // ======================================================================
+// ---------- cloud sync status ----------
+/** Run a Firestore write without waiting for the server; show a banner if the server rejects it. */
+function save(promise) {
+  promise.then(() => { if (syncState === "error-write") setSync("ok"); }).catch((err) => setSync("error", err, true));
+  return promise;
+}
+let syncState = "checking";
+let pendingSince = 0;
+function syncFromSnapshot(snap) {
+  if (syncState === "error") return;
+  if (snap.metadata.hasPendingWrites) {
+    pendingSince = pendingSince || Date.now();
+    setSync(Date.now() - pendingSince > 8000 ? "pending-long" : "pending");
+    setTimeout(() => { if (syncState === "pending" && pendingSince) setSync("pending-long"); }, 8500);
+  } else {
+    pendingSince = 0;
+    setSync(snap.metadata.fromCache ? "offline" : "ok");
+  }
+}
+function setSync(state, err, fromWrite) {
+  syncState = fromWrite ? "error-write" : state;
+  const email = user?.email || "";
+  const line = $("accountLine");
+  const labels = {
+    checking: "connecting to cloud…", ok: "synced", pending: "saving…", "pending-long": "not synced yet",
+    offline: "offline — saved on this device", error: "not syncing", "error-write": "not syncing",
+  };
+  line.className = "account-line " + ({ ok: "", pending: "pending", "pending-long": "pending", offline: "offline", checking: "pending" }[state] ?? "error");
+  line.innerHTML = '<span class="dot"></span>';
+  line.appendChild(document.createTextNode(`${email} · ${labels[syncState] || state}`));
+
+  const banner = $("syncBanner");
+  let title = "", text = "";
+  if (state === "error") {
+    const code = err?.code || "";
+    if (code === "permission-denied") {
+      title = "Your tasks can’t reach the cloud database";
+      text = "The Firestore security rules haven’t been published, so the database blocks this app. Tasks are only on this device. Fix: Firebase console → Firestore Database → Rules → paste the rules from the README → Publish.";
+    } else if (code === "not-found" || code === "failed-precondition" && /database/i.test(err?.message || "")) {
+      title = "The cloud database doesn’t exist yet";
+      text = "Create it in the Firebase console: Firestore Database → Create database. Tasks are only on this device until then.";
+    } else {
+      title = "Can’t sync with the cloud";
+      text = (err?.message || String(err)) + " — tasks are kept on this device.";
+    }
+  } else if (state === "pending-long") {
+    title = "Not synced yet";
+    text = navigator.onLine
+      ? "Changes are saved on this device but the cloud hasn’t confirmed them. If this stays, check the database rules (see README)."
+      : "You’re offline. Changes are saved on this device and will upload when you reconnect.";
+  }
+  banner.classList.toggle("hidden", !title);
+  $("syncTitle").textContent = title;
+  $("syncText").textContent = text;
+}
+window.addEventListener("online", () => syncState === "pending-long" && setSync("pending-long"));
+
 function toast(msg) {
   const el = $("toast");
   el.textContent = msg;

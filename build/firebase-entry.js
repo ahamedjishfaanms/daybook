@@ -3,10 +3,11 @@ export { initializeApp } from "firebase/app";
 export {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendPasswordResetEmail, signOut, updateProfile,
+  GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signInWithCredential,
 } from "firebase/auth";
 export {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, addDoc, updateDoc, deleteDoc, setDoc, onSnapshot, query, orderBy,
-  serverTimestamp, Timestamp, increment,
+  serverTimestamp, Timestamp, increment, getDoc,
 } from "firebase/firestore";
 export { getMessaging, getToken, isSupported } from "firebase/messaging";

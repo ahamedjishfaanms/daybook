@@ -137,3 +137,29 @@ export async function dismissNative(taskId) {
   if (!isNative) return;
   try { await LN.removeDeliveredNotificationsById({ ids: [idFor(taskId)] }); } catch {}
 }
+
+// ---------- Google sign-in inside the APK ----------
+// Google blocks its sign-in page inside app web views, so the APK uses Android's own
+// account picker (Credential Manager) and hands the resulting ID token to Firebase.
+let social = null;
+let socialReady = null;
+export function nativeGoogleReady(webClientId) {
+  if (!isNative || !webClientId || webClientId.startsWith("PASTE")) return false;
+  if (!social) {
+    social = registerPlugin("SocialLogin");
+    socialReady = social.initialize({ google: { webClientId, mode: "online" } });
+  }
+  return true;
+}
+/** Shows the Google account picker; resolves to an ID token for Firebase. */
+export async function nativeGoogleIdToken() {
+  await socialReady;
+  const res = await social.login({ provider: "google", options: { scopes: ["email", "profile"] } });
+  const idToken = res?.result?.idToken;
+  if (!idToken) throw new Error("Google didn’t return a sign-in token. Please try again.");
+  return idToken;
+}
+export async function nativeGoogleLogout() {
+  if (!social) return;
+  try { await socialReady; await social.logout({ provider: "google" }); } catch {}
+}
